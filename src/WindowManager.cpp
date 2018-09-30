@@ -23,8 +23,8 @@ std::unique_ptr<WindowManager> WindowManager::Create() {
 
 WindowManager::WindowManager(Display *display) {
     if (display) {
-        display = display;
-        _root = DefaultRootWindow(display);
+        _display = display;
+        _root = DefaultRootWindow(_display);
     }
 }
 
@@ -43,7 +43,7 @@ void WindowManager::Run() {
 
     CHECK(XQueryTree(_display, _root, &root, &parent, &topLevelWindows, &count));
 
-    CHECK_EQ(root, root); // should be the same
+    CHECK_EQ(root, _root); // should be the same
 
     for (unsigned int i = 0; i < count; ++i) {
         Frame(topLevelWindows[i], true);
