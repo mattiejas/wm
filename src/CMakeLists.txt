@@ -11,7 +11,7 @@ set(SRC
         events/Event.h
         events/CreateWindowEvent.h
         events/DestroyWindowEvent.h
-        events/EventFactory.cpp events/EventFactory.h)
+        events/EventFactory.cpp events/EventFactory.h events/EventHandler.cpp events/EventHandler.h events/ConfigureRequestEvent.h events/MapRequestEvent.h events/UnmapEvent.h)
 
 add_executable(wm ${SRC})
 target_link_libraries(wm ${X11_LIBRARIES} glog::glog)

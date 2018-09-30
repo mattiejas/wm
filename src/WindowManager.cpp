@@ -8,6 +8,7 @@
 #include "WindowManager.h"
 #include "events/Event.h"
 #include "events/EventFactory.h"
+#include "events/EventHandler.h"
 
 std::unique_ptr<WindowManager> WindowManager::Create() {
     Display *display = XOpenDisplay(nullptr);
@@ -22,8 +23,8 @@ std::unique_ptr<WindowManager> WindowManager::Create() {
 
 WindowManager::WindowManager(Display *display) {
     if (display) {
-        _display = display;
-        _root = DefaultRootWindow(_display);
+        display = display;
+        _root = DefaultRootWindow(display);
     }
 }
 
@@ -42,7 +43,7 @@ void WindowManager::Run() {
 
     CHECK(XQueryTree(_display, _root, &root, &parent, &topLevelWindows, &count));
 
-    CHECK_EQ(root, _root); // should be the same
+    CHECK_EQ(root, root); // should be the same
 
     for (unsigned int i = 0; i < count; ++i) {
         Frame(topLevelWindows[i], true);
@@ -51,27 +52,14 @@ void WindowManager::Run() {
     XFree(topLevelWindows);
     XUngrabServer(_display);
 
+    auto eventHandler = EventHandler(*this);
+
     while (isRunning) {
         XEvent e;
         XNextEvent(_display, &e);
         LOG(INFO) << "Received event: " << e.type;
 
-        switch (e.type) {
-            case CreateNotify:
-                OnCreateNotify(e.xcreatewindow);
-                break;
-            case ConfigureRequest:
-                OnConfigureRequest(e.xconfigurerequest);
-                break;
-            case MapRequest:
-                OnMapRequest(e.xmaprequest);
-                break;
-            case UnmapNotify:
-                OnUnmapNotify(e.xunmap);
-                break;
-            default:
-                LOG(WARNING) << "Ignored event";
-        }
+        EventFactory::getEvent(e)->process(eventHandler);
     }
 }
 
@@ -82,35 +70,7 @@ void WindowManager::OnXError(Display *display, XErrorEvent *e) {
 void WindowManager::OnWMDetected(Display *display, XErrorEvent *e) {
     // Only BadAccess is expected here, happens when another X client has been registered.
     CHECK_EQ(e->error_code, BadAccess); // logs when error code is not BadAccess
-//    _wmDetected = true;
-}
-
-void WindowManager::OnCreateNotify(const XCreateWindowEvent &e) {
-    // window is invisible when created
-}
-
-void WindowManager::OnConfigureRequest(const XConfigureRequestEvent &e) {
-    XWindowChanges changes;
-    changes.x = e.x;
-    changes.y = e.y;
-    changes.width = e.width;
-    changes.height = e.height;
-    changes.border_width = e.border_width;
-    changes.sibling = e.above;
-    changes.stack_mode = e.detail;
-
-    if (_clients.count(e.window)) {
-        const Window frame = _clients[e.window];
-        XConfigureWindow(_display, frame, (unsigned int) e.value_mask, &changes);
-        LOG(INFO) << "Resize " << e.window << " to " << e.width << "x" << e.height;
-    }
-
-    XConfigureWindow(_display, e.window, (unsigned int) e.value_mask, &changes);
-    LOG(INFO) << "Resize " << e.window << " to " << e.width << "x" << e.height;
-}
-
-void WindowManager::OnMapRequest(const XMapRequestEvent &e) {
-    Frame(e.window);
+//    wmHasBeenDetected = true;
 }
 
 void WindowManager::Frame(Window w, bool createdBeforeWindowManager) {
@@ -185,34 +145,12 @@ void WindowManager::Frame(Window w, bool createdBeforeWindowManager) {
     LOG(INFO) << "Framed window " << w << " [" << frame << "]";
 }
 
-void WindowManager::OnUnmapNotify(XUnmapEvent &e) {
-    if (e.event == _root) {
-        LOG(INFO) << "Ignore UnmapNotify for reparented pre-existing window " << e.window;
-        return;
-    } else if (!_clients.count(e.window)) {
-        LOG(INFO) << "Ignore UnmapNotify for non-client window " << e.window;
-        return;
-    }
-
-    Unframe(e.window);
-}
-
 void WindowManager::Unframe(Window w) {
-    // We reverse the steps taken in Frame().
     const Window frame = _clients[w];
-    // 1. Unmap frame.
     XUnmapWindow(_display, frame);
-    // 2. Reparent client window back to root window.
-    XReparentWindow(
-            _display,
-            w,
-            _root,
-            0, 0);  // Offset of client window within root.
-    // 3. Remove client window from save set, as it is now unrelated to us.
+    XReparentWindow(_display, w, _root, 0, 0);  // Offset of client window within root.
     XRemoveFromSaveSet(_display, w);
-    // 4. Destroy frame.
     XDestroyWindow(_display, frame);
-    // 5. Drop reference to frame handle.
     _clients.erase(w);
 
     LOG(INFO) << "Unframed window " << w << " [" << frame << "]";
